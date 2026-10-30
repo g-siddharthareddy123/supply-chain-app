@@ -1,0 +1,164 @@
+SUPPLY CHAIN CONTROL TOWER - API BACKEND REFERENCE
+=================================================
+
+Base URL: /api/v1
+Interactive API documentation: /docs
+Health check: GET /health
+Content type for JSON bodies: application/json
+
+AUTHENTICATION
+--------------
+API-key authentication is optional and configured with API_KEY. When configured,
+send the X-API-Key header on every /api/v1 request. The health endpoint is public.
+
+CATALOG: PRODUCTS
+-----------------
+GET    /api/v1/products
+       List products ordered by SKU.
+POST   /api/v1/products
+       Create a product. Body: {"sku": "...", "name": "...",
+       "unit_of_measure": "EA", "lead_time_days": 0}
+GET    /api/v1/products/{product_id}
+       Retrieve product details.
+PUT    /api/v1/products/{product_id}
+       Replace product fields using the product creation body.
+DELETE /api/v1/products/{product_id}
+       Delete only when no other records reference the product.
+
+CATALOG: LOCATIONS
+------------------
+GET    /api/v1/locations
+       List locations ordered by code.
+POST   /api/v1/locations
+       Create a location. Body: {"code": "...", "name": "...", "timezone": null}
+GET    /api/v1/locations/{location_id}
+       Retrieve location details.
+PUT    /api/v1/locations/{location_id}
+       Replace location fields using the location creation body.
+DELETE /api/v1/locations/{location_id}
+       Delete only when no other records reference the location.
+
+INVENTORY AND RECEIPTS
+----------------------
+GET    /api/v1/inventory?product_id=1&sku=SKU-001&location_id=1
+       List inventory, optionally filtered by product ID, SKU, or location ID.
+POST   /api/v1/inventory/adjust
+       Adjust inventory. Body: {"product_id": 1, "location_id": 1,
+       "delta": 5, "reason": "cycle count correction"}. Delta must be nonzero;
+       negative adjustments cannot reduce on-hand inventory below zero.
+GET    /api/v1/receipts
+       List receipts by expected arrival.
+POST   /api/v1/receipts
+       Create a receipt. Body: {"receipt_code": "...", "product_id": 1,
+       "location_id": 1, "quantity": 10, "expected_arrival": "YYYY-MM-DDTHH:MM:SS"}
+GET    /api/v1/receipts/{receipt_id}
+       Retrieve receipt details.
+PATCH  /api/v1/receipts/{receipt_id}?reason=...
+       Update receipt quantity, expected_arrival, or a supported status.
+       Body fields: {"quantity": 10, "expected_arrival": "...", "status": "PLANNED"}.
+       The receive and cancel transitions must use their dedicated endpoints.
+POST   /api/v1/receipts/{receipt_id}/receive?reason=...
+       Receive a receipt once and add its quantity to on-hand inventory. Repeated
+       receive calls are idempotent and report already_received.
+POST   /api/v1/receipts/{receipt_id}/cancel?reason=...
+       Cancel an eligible receipt and remove it from projected future supply.
+       A received receipt cannot be canceled; use an audited inventory adjustment.
+
+AVAILABLE-TO-PROMISE (ATP)
+-------------------------
+GET    /api/v1/atp/{product_id}/{location_id}
+       Return current on-hand, inbound, allocation-demand, and projected ATP events
+       for a product/location.
+GET    /api/v1/atp/{product_id}?start=...&end=...
+       Return location ATP projections over the requested date range.
+
+CUSTOMER ORDERS
+---------------
+POST   /api/v1/orders
+       Create a draft order. Body:
+       {"order_number": "...", "customer_name": "...", "priority": "MED",
+        "requested_ship_date": "YYYY-MM-DDTHH:MM:SS",
+        "lines": [{"product_id": 1, "requested_quantity": 2,
+                   "preferred_location_id": null}]}
+GET    /api/v1/orders
+       List orders. Optional query parameters:
+       search, order_status, priority, exception_type, requested_from,
+       requested_to, sort (oldest|earliest_promise|highest_risk), page, page_size.
+       Returns items and pagination metadata.
+GET    /api/v1/orders/{order_id}
+       Retrieve order and order-line planning details.
+PATCH  /api/v1/orders/{order_id}
+       Update supplied order fields: customer_name, priority,
+       requested_ship_date.
+POST   /api/v1/orders/{order_id}/lines
+       Add a line. Body: {"product_id": 1, "requested_quantity": 2,
+       "preferred_location_id": null}
+PATCH  /api/v1/orders/{order_id}/lines/{line_id}
+       Update a line using the same body as add-line. Requested quantity cannot
+       be reduced below its already-shipped quantity.
+DELETE /api/v1/orders/{order_id}/lines/{line_id}?reason=...
+       Delete an unshipped line.
+POST   /api/v1/orders/{order_id}/confirm
+       Confirm a draft order and include it in allocation.
+POST   /api/v1/orders/{order_id}/cancel?reason=...
+       Cancel an eligible order and release outstanding reservations without
+       restoring stock already shipped.
+GET    /api/v1/orders/{order_id}/allocations
+       List active and historical allocation records.
+GET    /api/v1/orders/{order_id}/timeline
+       List available inventory, receipt, allocation, shipment, and audit events
+       associated with this order and its products.
+GET    /api/v1/orders/{order_id}/shipments
+       List shipment records and their shipped lines.
+
+EXCEPTIONS
+----------
+GET    /api/v1/exceptions?exception_status=OPEN&exception_type=BACKORDER&sort=oldest
+       List exceptions. exception_status supports OPEN/RESOLVED; sort supports
+       oldest/newest. Exception state is refreshed during allocation rebuilds.
+
+PLANNER ACTIONS AND SHIPMENTS
+-----------------------------
+POST   /api/v1/planner/receipts/{receipt_id}/expedite
+       Body: {"expected_arrival": "YYYY-MM-DDTHH:MM:SS", "reason": "..."}.
+       The proposed arrival must be earlier than the current arrival.
+POST   /api/v1/planner/order-lines/{line_id}/reassign
+       Body: {"location_id": 1, "reason": "..."}.
+POST   /api/v1/planner/order-lines/{line_id}/promise-override
+       Body: {"promised_ship_date": "YYYY-MM-DDTHH:MM:SS", "reason": "..."}.
+POST   /api/v1/shipments
+       Create a partial or complete shipment. Body:
+       {"reason": "...", "lines": [{"order_line_id": 1, "quantity": 1,
+                                    "location_id": 1}]}
+       Shipment quantities must be covered by active on-hand allocations and
+       physically available stock.
+
+AI-ASSISTED FEATURES (RULE-BASED; NO EXTERNAL AI SERVICE)
+--------------------------------------------------------
+POST   /api/v1/ai/planner-notes
+       Propose supported changes from free-form text. Recognizes existing
+       receipt codes plus delay/expedite and an ISO date, or reassign/move with
+       a persisted order number, product SKU (when needed), and location code.
+       This endpoint only saves a proposal and preview; it does not apply changes.
+POST   /api/v1/ai/planner-notes/{interaction_id}/apply?reason=...
+       Revalidate and apply a saved supported proposal after explicit approval.
+POST   /api/v1/ai/orders/{order_id}/customer-message
+       Generate and save an editable customer message draft from current order data.
+PATCH  /api/v1/ai/customer-messages/{message_id}
+       Edit an unsent message. Body: {"message": "..."}
+POST   /api/v1/ai/customer-messages/{message_id}/mark-sent
+       Mark a message as sent locally. This does not send email.
+GET    /api/v1/ai/orders/{order_id}/exception-summary
+       Return a persisted-data-based advisory fulfillment summary and risks.
+
+GENERAL BEHAVIOR
+----------------
+- Draft orders are not allocated. Confirmed and fulfilling orders participate.
+- Allocation rebuilds are deterministic and release obsolete active reservations;
+  shipment history is retained.
+- Important inventory, receipt, order, planner, shipment, message, and AI-applied
+  actions write audit records. Mutating planner and inventory actions require reasons.
+- Common responses include 201 for creation, 204 for successful deletion,
+  404 for missing records, 409 for conflicting state/duplicate records, and
+  422 for invalid input or transitions.
+- Check /docs for generated schemas and interactive endpoint details.
