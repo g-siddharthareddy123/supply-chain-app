@@ -54,3 +54,11 @@ npm run preview
 ```
 
 All business data is read from the backend. Dashboard metrics are based on fetched backend responses; the orders list follows the backend's pagination metadata. ATP values are displayed as returned by the backend and are not recalculated in the browser.
+
+## Source structure
+
+- `src/pages/` contains one module per route page; `index.js` exports the pages used by the lazy route loader.
+- `src/components/common/`, `src/components/layout/`, `src/components/forms/`, and `src/components/dashboard/` contain reusable UI components.
+- `src/api/` remains the single Axios client and API service layer.
+- `src/hooks/` contains shared data-loading and toast hooks; `src/utils/` contains shared display formatters.
+- `src/styles.css` retains the application-wide design and responsive styles.
