@@ -8,3 +8,6 @@ htmlcov/
 *.py[cod]
 *.db
 alembic/versions/__pycache__/
+frontend/.env
+frontend/node_modules/
+frontend/dist/
