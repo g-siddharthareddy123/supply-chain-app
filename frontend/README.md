@@ -25,9 +25,16 @@ VITE_API_KEY=
 VITE_API_PROXY_TARGET=http://127.0.0.1:8000
 ```
 
-For local development, keep the relative API base URL: Vite proxies `/api/v1` and `/health` to `VITE_API_PROXY_TARGET`, avoiding browser CORS configuration. When the backend has `API_KEY` configured, set the same value in `VITE_API_KEY`. The key is sent only to `/api/v1` calls; the public `/health` check does not include it. Do not commit `.env` or expose a production API key in a public frontend build.
+For local development, keep the relative API base URL: Vite proxies `/api/v1` and `/health` to `VITE_API_PROXY_TARGET`, avoiding browser CORS configuration. Sign in through `/login`; the frontend stores the JWT in `sessionStorage` and attaches it as a bearer token. A configured `VITE_API_KEY` is sent alongside an active JWT only; do not put production API keys in a public frontend build. External API clients can continue using `X-API-Key` when the backend `API_KEY` is configured.
 
 For production, serve the frontend and API on the same origin through a reverse proxy, or set `VITE_API_BASE_URL` to the backend's absolute `/api/v1` URL and configure the backend to allow the frontend origin.
+
+The backend needs a private `JWT_SECRET_KEY` and a user created with
+`python -m scripts.create_user` or, in development only, from `/signup`; see
+the repository README for setup. The
+tab-scoped bearer token is removed on sign out or an authentication failure.
+Because browser storage is accessible to same-origin JavaScript, protect the
+frontend against XSS and use HTTPS in deployment.
 
 ## Start
 
@@ -54,6 +61,14 @@ npm run preview
 ```
 
 All business data is read from the backend. Dashboard metrics are based on fetched backend responses; the orders list follows the backend's pagination metadata. ATP values are displayed as returned by the backend and are not recalculated in the browser.
+
+Order fulfillment summaries use each order line's requested and shipped quantities from the order API. Remaining quantity is requested minus shipped; allocation is shown separately and never counted as shipped. Backorders use the backend's persisted calculation (outstanding requested quantity minus allocated quantity). The order detail view uses active allocation records for current allocation/location and shipment records for shipped locations. Canceled orders show backorder as not applicable.
+
+Run the frontend fulfillment calculation tests with:
+
+```powershell
+npm test
+```
 
 ## Source structure
 

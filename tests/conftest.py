@@ -5,13 +5,15 @@ from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.db import Base, get_db
 from app.main import app
 from app import models  # noqa: F401
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(settings, "api_key", "test-api-key")
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     @event.listens_for(engine, "connect")
@@ -30,7 +32,7 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_db
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"X-API-Key": "test-api-key"}) as test_client:
         yield test_client
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)

@@ -1,11 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_auth
 from app.db import get_db
-from app.models import Location, Product
+from app.models import (
+    Allocation,
+    InboundReceipt,
+    Inventory,
+    Location,
+    OrderLine,
+    Product,
+    ShipmentLine,
+)
 from app.schemas import LocationCreate, LocationOut, ProductCreate, ProductOut
 
 router = APIRouter(dependencies=[Depends(require_auth)])
@@ -113,9 +121,44 @@ def delete_location(location_id: int, db: Session = Depends(get_db)):
     location = db.get(Location, location_id)
     if not location:
         raise HTTPException(404, "Location not found")
+
+    reference_counts = [
+        ("inventory record", "inventory records", Inventory, Inventory.location_id),
+        ("inbound receipt", "inbound receipts", InboundReceipt, InboundReceipt.location_id),
+        (
+            "order-line location preference",
+            "order-line location preferences",
+            OrderLine,
+            OrderLine.preferred_location_id,
+        ),
+        ("allocation", "allocations", Allocation, Allocation.location_id),
+        ("shipment line", "shipment lines", ShipmentLine, ShipmentLine.location_id),
+    ]
+    references = []
+    for singular, plural, model, column in reference_counts:
+        count = db.scalar(
+            select(func.count()).select_from(model).where(column == location_id)
+        )
+        if count:
+            references.append(f"{count} {singular if count == 1 else plural}")
+    if references:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Location '{location.code}' cannot be deleted because it is used by "
+                f"{', '.join(references)}. Existing supply-chain records were preserved."
+            ),
+        )
+
     db.delete(location)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(409, "Location is referenced by other records and cannot be deleted") from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Location '{location.code}' is referenced by existing records and cannot "
+                "be deleted. Existing supply-chain records were preserved."
+            ),
+        ) from exc

@@ -4,6 +4,11 @@ const req = async (promise) => (await promise).data;
 const query = (params) => ({ params: Object.fromEntries(Object.entries(params).filter(([, value]) => value !== "" && value != null)) });
 
 export const api = {
+  auth: {
+    login: (credentials) => req(client.post("/auth/login", credentials)),
+    register: (credentials) => req(client.post("/auth/register", credentials)),
+    me: () => req(client.get("/auth/me")),
+  },
   products: {
     list: () => req(client.get("/products")),
     get: (id) => req(client.get(`/products/${id}`)),

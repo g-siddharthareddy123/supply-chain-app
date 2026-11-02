@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
+import { IconButton } from "./IconButton";
 
 export function Modal({ title, onClose, children, wide = false }) {
   useEffect(() => {

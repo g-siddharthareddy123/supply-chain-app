@@ -11,6 +11,7 @@ import {
   CircleHelp,
   ClipboardList,
   LayoutDashboard,
+  LogOut,
   MapPin,
   Menu,
   Package,
@@ -18,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { checkHealth } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 
 const navigation = [
   ["/", "Dashboard", LayoutDashboard],
@@ -34,6 +36,7 @@ const navigation = [
 ];
 
 export function AppLayout() {
+  const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [health, setHealth] = useState("checking");
   const location = useLocation();
@@ -83,24 +86,26 @@ export function AppLayout() {
             <X size={18} />
           </button>
         </div>
-        <div className="nav-caption">WORKSPACE</div>
-        <nav className="nav-list" aria-label="Main navigation">
-          {navigation.map(([path, label, Icon]) => (
-            <NavLink
-              key={path}
-              to={path}
-              end={path === "/"}
-              className={({ isActive }) =>
-                `nav-link ${isActive ? "active" : ""}`
-              }
-              onClick={() => setMobileOpen(false)}
-            >
-              <Icon size={18} strokeWidth={1.8} />
-              <span>{label}</span>
-              {label === "Exceptions" && <span className="nav-dot" />}
-            </NavLink>
-          ))}
-        </nav>
+        <div className="sidebar-navigation">
+          <div className="nav-caption">WORKSPACE</div>
+          <nav className="nav-list" aria-label="Main navigation">
+            {navigation.map(([path, label, Icon]) => (
+              <NavLink
+                key={path}
+                to={path}
+                end={path === "/"}
+                className={({ isActive }) =>
+                  `nav-link ${isActive ? "active" : ""}`
+                }
+                onClick={() => setMobileOpen(false)}
+              >
+                <Icon size={18} strokeWidth={1.8} />
+                <span>{label}</span>
+                {label === "Exceptions" && <span className="nav-dot" />}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
         <div className="sidebar-bottom">
           <div className="support-card">
             <div className="support-icon">
@@ -115,10 +120,12 @@ export function AppLayout() {
           <div className="profile">
             <div className="avatar">SC</div>
             <div>
-              <b>Supply Chain Ops</b>
-              <span>Control tower</span>
+              <b>{user?.email}</b>
+              <span>Signed in</span>
             </div>
-            <span className="profile-menu">···</span>
+            <button className="profile-logout" type="button" onClick={logout} aria-label="Sign out">
+              <LogOut size={15} />
+            </button>
           </div>
         </div>
       </aside>
@@ -144,6 +151,10 @@ export function AppLayout() {
                   ? "Backend connected"
                   : "Backend unavailable"}
             </div>
+            <button className="button secondary header-logout" type="button" onClick={logout}>
+              <LogOut size={14} />
+              Sign out
+            </button>
           </div>
         </header>
         <div className="content">

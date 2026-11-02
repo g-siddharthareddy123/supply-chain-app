@@ -27,6 +27,7 @@ import {
   number,
   asArray,
 } from "./shared";
+import { getOrderFulfillment } from "../utils/fulfillment";
 
 export function Orders() {
   const notify = useToast();
@@ -214,6 +215,28 @@ export function Orders() {
                   key: "requested_ship_date",
                   label: "Requested ship",
                   render: (row) => dateLabel(row.requested_ship_date),
+                },
+                {
+                  key: "fulfillment",
+                  label: "Fulfillment",
+                  render: (row) => {
+                    const fulfillment = getOrderFulfillment(row);
+                    return (
+                      <span className="fulfillment-summary">
+                        <strong>
+                          Ordered {number(fulfillment.ordered)} · Shipped{" "}
+                          {number(fulfillment.shipped)}
+                        </strong>
+                        <span>
+                          Allocated {number(fulfillment.allocated)} · Remaining{" "}
+                          {number(fulfillment.remaining)} · Backordered{" "}
+                          {fulfillment.backordered == null
+                            ? "N/A"
+                            : number(fulfillment.backordered)}
+                        </span>
+                      </span>
+                    );
+                  },
                 },
                 {
                   key: "promise",
