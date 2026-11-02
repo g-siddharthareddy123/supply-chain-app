@@ -29,6 +29,48 @@ A synchronous FastAPI service for product/location catalog, inventory, inbound r
    uvicorn app.main:app --reload
    ```
 
+### Aiven MySQL configuration
+
+FastAPI and Alembic both use the same parsed `DATABASE_URL` from
+`app.config.settings`; Alembic does not independently read process variables.
+For the configured Aiven instance, set these values in the repository-root
+`.env`:
+
+```dotenv
+DATABASE_URL=mysql+pymysql://avnadmin@mysql-38ceb870-siddharthareddyganta-be20.e.aivencloud.com:13853/defaultdb
+DATABASE_PASSWORD='enter-your-real-password-here'
+AIVEN_CA_CERT=C:\path\to\your\aiven-ca.pem
+```
+
+Replace the password locally; do not commit it or paste it into chat. Keeping it
+in `DATABASE_PASSWORD` lets SQLAlchemy safely handle characters such as `@`,
+`/`, `:`, `?`, and `#` without URL-encoding errors. If you instead include the
+password in `DATABASE_URL`, percent-encode its special characters.
+Download the CA certificate from the Aiven service's connection/security
+settings and point `AIVEN_CA_CERT` at that file. Aiven connections require this
+CA and verify both the certificate chain and hostname; missing or mismatched
+connection settings fail before connecting.
+
+The process environment overrides `.env`. If PowerShell has an old
+`DATABASE_URL` set, remove it for the current terminal before running Alembic
+or Uvicorn:
+
+```powershell
+Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:DATABASE_PASSWORD -ErrorAction SilentlyContinue
+Remove-Item Env:AIVEN_CA_CERT -ErrorAction SilentlyContinue
+```
+
+Then from the repository root, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+Restart FastAPI after migrations. For a deployed backend, set the same three
+variables in the backend hosting service's environment configuration; do not
+put database credentials in frontend/Vite or browser-visible variables.
+
 ### Authentication setup
 
 For local development, set `APP_ENV=development` in the repository-root
