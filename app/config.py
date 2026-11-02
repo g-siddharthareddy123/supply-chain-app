@@ -11,6 +11,15 @@ load_dotenv(PROJECT_ROOT / ".env")
 AIVEN_MYSQL_HOST = "mysql-38ceb870-siddharthareddyganta-be20.e.aivencloud.com"
 
 
+def resolve_ca_certificate(ca_certificate: str | None) -> str | None:
+    if not ca_certificate:
+        return None
+    path = Path(ca_certificate).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return str(path.resolve())
+
+
 def build_database_url(database_url: str, password: str | None = None) -> URL:
     try:
         url = make_url(database_url)
@@ -41,7 +50,8 @@ def validate_aiven_database(url: URL, ca_certificate: str | None) -> None:
         raise RuntimeError(
             "DATABASE_PASSWORD or a password in DATABASE_URL is required for Aiven MySQL."
         )
-    if not ca_certificate or not Path(ca_certificate).is_file():
+    ca_path = resolve_ca_certificate(ca_certificate)
+    if not ca_path or not Path(ca_path).is_file():
         raise RuntimeError(
             "AIVEN_CA_CERT must point to the downloaded Aiven CA certificate file."
         )
@@ -56,7 +66,7 @@ class Settings:
     )
     api_prefix = "/api/v1"
     database_url = build_database_url(database_url, os.getenv("DATABASE_PASSWORD"))
-    aiven_ca_cert = os.getenv("AIVEN_CA_CERT")
+    aiven_ca_cert = resolve_ca_certificate(os.getenv("AIVEN_CA_CERT"))
     api_key = os.getenv("API_KEY")
     jwt_secret_key = os.getenv("JWT_SECRET_KEY")
     jwt_algorithm = os.getenv("JWT_ALGORITHM", "HS256")
