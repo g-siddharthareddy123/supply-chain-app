@@ -4,6 +4,7 @@ from sqlalchemy.engine import make_url
 from app.config import (
     AIVEN_MYSQL_HOST,
     build_database_url,
+    resolve_ca_certificate,
     validate_aiven_database,
 )
 from app import db as database
@@ -97,3 +98,12 @@ def test_aiven_validation_error_does_not_expose_password(tmp_path):
         validate_aiven_database(aiven_url(password=secret), None)
 
     assert secret not in str(error.value)
+
+
+def test_relative_ca_certificate_path_is_resolved_from_project_root(monkeypatch, tmp_path):
+    ca_file = tmp_path / "certs" / "ca.pem"
+    ca_file.parent.mkdir()
+    ca_file.write_text("test certificate path", encoding="utf-8")
+    monkeypatch.setattr("app.config.PROJECT_ROOT", tmp_path)
+
+    assert resolve_ca_certificate("certs/ca.pem") == str(ca_file.resolve())
