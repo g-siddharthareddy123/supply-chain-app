@@ -1,13 +1,48 @@
 from datetime import datetime
 from decimal import Decimal
+import re
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import OrderPriority, OrderStatus, ReceiptStatus
 
 
 class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=12, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_and_validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not re.fullmatch(
+            r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+            r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}",
+            normalized,
+        ):
+            raise ValueError("Enter a valid email address.")
+        return normalized
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class UserProfile(ORMModel):
+    id: int
+    email: str
+    is_active: bool
 
 
 class ProductCreate(BaseModel):

@@ -1,3 +1,5 @@
+import { Empty } from "./Empty";
+
 export function DataTable({
   columns,
   rows,
@@ -18,7 +20,12 @@ export function DataTable({
           {rows.map((row, index) => (
             <tr
               key={
-                row.id ?? row.order_id ?? row.receipt_id ?? row.line_id ?? index
+                row.shipment_code ??
+                row.id ??
+                row.order_id ??
+                row.receipt_id ??
+                row.line_id ??
+                index
               }
             >
               {columns.map((column) => (

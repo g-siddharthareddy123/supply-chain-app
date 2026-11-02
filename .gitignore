@@ -11,3 +11,14 @@ alembic/versions/__pycache__/
 frontend/.env
 frontend/node_modules/
 frontend/dist/
+
+# Environment files and secrets
+.env.*
+!.env.example
+
+# Frontend environment files
+frontend/.env.*
+!frontend/.env.example
+
+# Temporary frontend tooling
+frontend/.tsupgrader/

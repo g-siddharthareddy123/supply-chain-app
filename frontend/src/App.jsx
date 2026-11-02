@@ -2,6 +2,9 @@ import { lazy, Suspense, useCallback, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout, Toasts } from "./components/index.js";
 import { ToastContext } from "./contexts";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import { ProtectedRoute, PublicOnlyRoute } from "./components/auth/ProtectedRoute";
 
 const loadPage = (name) =>
   lazy(() =>
@@ -44,20 +47,38 @@ export default function App() {
         }
       >
         <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="products" element={<Products />} />
-            <Route path="locations" element={<Locations />} />
-            <Route path="inventory" element={<Inventory />} />
-            <Route path="receipts" element={<Receipts />} />
-            <Route path="atp" element={<ATPPlanning />} />
-            <Route path="orders" element={<Orders />} />
-            <Route path="orders/:orderId" element={<OrderDetails />} />
-            <Route path="exceptions" element={<Exceptions />} />
-            <Route path="planner" element={<PlannerWorkspace />} />
-            <Route path="shipments" element={<Shipments />} />
-            <Route path="assistant" element={<AIAssistant />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="/login"
+            element={
+              <PublicOnlyRoute>
+                <Login />
+              </PublicOnlyRoute>
+            }
+          />
+          <Route
+            path="/signup"
+            element={
+              <PublicOnlyRoute>
+                <Signup />
+              </PublicOnlyRoute>
+            }
+          />
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="products" element={<Products />} />
+              <Route path="locations" element={<Locations />} />
+              <Route path="inventory" element={<Inventory />} />
+              <Route path="receipts" element={<Receipts />} />
+              <Route path="atp" element={<ATPPlanning />} />
+              <Route path="orders" element={<Orders />} />
+              <Route path="orders/:orderId" element={<OrderDetails />} />
+              <Route path="exceptions" element={<Exceptions />} />
+              <Route path="planner" element={<PlannerWorkspace />} />
+              <Route path="shipments" element={<Shipments />} />
+              <Route path="assistant" element={<AIAssistant />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
           </Route>
         </Routes>
       </Suspense>

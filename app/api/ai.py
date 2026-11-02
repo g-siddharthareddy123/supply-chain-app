@@ -20,11 +20,16 @@ from app.services.planning import rebuild_allocations
 router = APIRouter(dependencies=[Depends(require_auth)])
 
 
+def _contains_identifier(text: str, identifier: str) -> bool:
+    pattern = rf"(?<![A-Za-z0-9_-]){re.escape(identifier)}(?![A-Za-z0-9_-])"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
 def parse_note(db: Session, text: str) -> list[dict]:
     actions = []
     receipts = db.scalars(select(InboundReceipt)).all()
     for receipt in receipts:
-        if receipt.receipt_code.lower() in text.lower():
+        if _contains_identifier(text, receipt.receipt_code):
             verb = re.search(r"\b(delay|expedite)\b", text, re.IGNORECASE)
             date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
             if verb and date_match:
@@ -39,7 +44,7 @@ def parse_note(db: Session, text: str) -> list[dict]:
         locations = db.scalars(select(Location)).all()
         orders = db.scalars(select(CustomerOrder)).all()
         for order in orders:
-            if order.order_number.lower() not in text.lower():
+            if not _contains_identifier(text, order.order_number):
                 continue
             matched_locations = [location for location in locations if
                                  re.search(rf"\b{re.escape(location.code)}\b", text, re.IGNORECASE)]
@@ -69,7 +74,7 @@ def parse_note(db: Session, text: str) -> list[dict]:
 def propose_actions(payload: PlannerNote, db: Session = Depends(get_db)):
     actions = parse_note(db, payload.text)
     matched_orders = [order.order_number for order in db.scalars(select(CustomerOrder)).all()
-                      if order.order_number.lower() in payload.text.lower()]
+                      if _contains_identifier(payload.text, order.order_number)]
     preview = "No supported, fully identified action was found; no records were changed."
     if actions:
         impacts = []

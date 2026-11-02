@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { Activity } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 import { api, allOrders } from "../api";
 import { getErrorMessage } from "../api/client";
 import { Button, Card, ErrorState, Loading, PageHeader } from "../components";
@@ -13,9 +14,27 @@ import {
   asArray,
 } from "./shared";
 
+const positiveId = (value) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
 export function PlannerWorkspace() {
+  const location = useLocation();
+  const exceptionContext = location.state?.source === "exceptions";
+  const contextOrderId = positiveId(location.state?.orderId);
+  const contextLineId = positiveId(location.state?.orderLineId);
+  const contextProductId = positiveId(location.state?.productId);
+  const contextLocationId = positiveId(location.state?.locationId);
   const notify = useToast();
-  const [formMode, setFormMode] = useState("expedite");
+  const [formMode, setFormMode] = useState(() =>
+    exceptionContext ? "reassign" : "expedite",
+  );
+  const [selectedLineId, setSelectedLineId] = useState(
+    contextLineId ? String(contextLineId) : "",
+  );
+  const [selectedReceiptId, setSelectedReceiptId] = useState("");
+  const [selectedLocationId, setSelectedLocationId] = useState("");
   const [saving, setSaving] = useState(false);
   const loader = useCallback(
     async () =>
@@ -29,6 +48,18 @@ export function PlannerWorkspace() {
     .flatMap((order) =>
       asArray(order.lines).map((line) => ({ ...line, order })),
     );
+  const lineFromException = lines.find(
+    (line) =>
+      line.id === contextLineId &&
+      line.order.id === contextOrderId &&
+      (contextProductId == null || line.product_id === contextProductId),
+  );
+  const selectedLine = lines.find(
+    (line) => line.id === Number(selectedLineId),
+  );
+  const locationMap = Object.fromEntries(
+    asArray(locations).map((item) => [item.id, item]),
+  );
   async function submit(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -105,7 +136,17 @@ export function PlannerWorkspace() {
               {formMode === "expedite" ? (
                 <>
                   <FormField label="Receipt">
-                    <select name="target" required>
+                    <select
+                      name="target"
+                      required
+                      value={exceptionContext ? selectedReceiptId : undefined}
+                      onChange={(event) =>
+                        setSelectedReceiptId(event.target.value)
+                      }
+                    >
+                      {exceptionContext && (
+                        <option value="">Choose a receipt</option>
+                      )}
                       {availableReceipts.map((r) => (
                         <option value={r.id} key={r.id}>
                           {r.receipt_code} · current{" "}
@@ -125,7 +166,21 @@ export function PlannerWorkspace() {
               ) : (
                 <>
                   <FormField label="Order line">
-                    <select name="target" required>
+                    <select
+                      name="target"
+                      required
+                      value={
+                        exceptionContext
+                          ? selectedLine
+                            ? selectedLineId
+                            : ""
+                          : undefined
+                      }
+                      onChange={(event) => setSelectedLineId(event.target.value)}
+                    >
+                      {exceptionContext && (
+                        <option value="">Choose an order line</option>
+                      )}
                       {lines.map((line) => (
                         <option key={line.id} value={line.id}>
                           {line.order.order_number} · line {line.id} · product{" "}
@@ -137,7 +192,19 @@ export function PlannerWorkspace() {
                   </FormField>
                   {formMode === "reassign" ? (
                     <FormField label="New fulfillment location">
-                      <select name="location_id" required>
+                      <select
+                        name="location_id"
+                        required
+                        value={
+                          exceptionContext ? selectedLocationId : undefined
+                        }
+                        onChange={(event) =>
+                          setSelectedLocationId(event.target.value)
+                        }
+                      >
+                        {exceptionContext && (
+                          <option value="">Choose a new location</option>
+                        )}
                         {locations.map((l) => (
                           <option key={l.id} value={l.id}>
                             {l.code} — {l.name}
@@ -166,6 +233,33 @@ export function PlannerWorkspace() {
               </div>
             </form>
           </Card>
+          {exceptionContext && (
+            <div className="notice warning">
+              <Activity size={17} />
+              <span>
+                {lineFromException
+                  ? `Exception target: order ${lineFromException.order.order_number}, line ${lineFromException.id}, product ${lineFromException.product_id}.`
+                  : "The exception target is not available as an active planner line. Select the appropriate line explicitly or review the order details."}
+                {contextLocationId && locationMap[contextLocationId]
+                  ? ` Current allocation location: ${locationMap[contextLocationId].code} — ${locationMap[contextLocationId].name}.`
+                  : ""}
+                {formMode === "reassign" &&
+                contextLocationId &&
+                locationMap[contextLocationId]
+                  ? " Choose the new fulfillment location separately; the current location is not preselected."
+                  : ""}
+                {contextOrderId && (
+                  <>
+                    {" "}
+                    <Link to={`/orders/${contextOrderId}`}>
+                      Review order details
+                    </Link>
+                    .
+                  </>
+                )}
+              </span>
+            </div>
+          )}
           <div className="notice info">
             <Activity size={17} />
             <span>

@@ -91,6 +91,81 @@ def test_draft_order_is_not_allocated_until_confirmed(client):
     assert Decimal(confirmed.json()["lines"][0]["allocated_quantity"]) == 3
 
 
+def test_location_crud_and_delete_preserve_referenced_supply_chain_records(client):
+    created = client.post(
+        "/api/v1/locations",
+        json={"code": "CRUD-L", "name": "CRUD warehouse", "timezone": "UTC"},
+    )
+    assert created.status_code == 201
+    location_id = created.json()["id"]
+    assert client.get(f"/api/v1/locations/{location_id}").json()["name"] == "CRUD warehouse"
+
+    updated = client.put(
+        f"/api/v1/locations/{location_id}",
+        json={"code": "CRUD-L-2", "name": "Updated warehouse", "timezone": "UTC"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated warehouse"
+
+    deleted = client.delete(f"/api/v1/locations/{location_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/v1/locations/{location_id}").status_code == 404
+
+    db_generator = client.app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        product, referenced_location, _ = setup_supply(db)
+        receipt = InboundReceipt(
+            receipt_code="REFERENCED-LOC-R",
+            product_id=product.id,
+            location_id=referenced_location.id,
+            quantity=Decimal("3"),
+            expected_arrival=datetime.utcnow() + timedelta(days=1),
+            status=ReceiptStatus.PLANNED,
+        )
+        order = CustomerOrder(
+            order_number="REFERENCED-LOC-O",
+            customer_name="Reference test",
+            requested_ship_date=datetime.utcnow() + timedelta(days=2),
+            status=OrderStatus.CONFIRMED,
+        )
+        line = OrderLine(
+            product_id=product.id,
+            requested_quantity=Decimal("2"),
+            preferred_location_id=referenced_location.id,
+        )
+        order.lines = [line]
+        db.add_all([receipt, order])
+        db.flush()
+        allocation = Allocation(
+            order_line_id=line.id,
+            location_id=referenced_location.id,
+            source_type="ON_HAND",
+            source_id=1,
+            quantity=Decimal("1"),
+            status="ACTIVE",
+        )
+        db.add(allocation)
+        db.commit()
+        referenced_location_id = referenced_location.id
+
+        response = client.delete(f"/api/v1/locations/{referenced_location_id}")
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert "1 inventory record" in detail
+        assert "1 inbound receipt" in detail
+        assert "1 order-line location preference" in detail
+        assert "1 allocation" in detail
+        assert "Existing supply-chain records were preserved." in detail
+        assert client.get(f"/api/v1/locations/{referenced_location_id}").status_code == 200
+        assert db.get(InboundReceipt, receipt.id) is not None
+        assert db.get(OrderLine, line.id) is not None
+        assert db.get(Allocation, allocation.id) is not None
+    finally:
+        db.close()
+        db_generator.close()
+
+
 def test_partial_shipment_only_consumes_on_hand_allocations(client):
     product = client.post("/api/v1/products", json={"sku": "SHIP-1", "name": "Ship product"}).json()
     location = client.post("/api/v1/locations", json={"code": "SHIP-L", "name": "Ship warehouse"}).json()
@@ -112,6 +187,111 @@ def test_partial_shipment_only_consumes_on_hand_allocations(client):
     assert Decimal(updated["lines"][0]["shipped_quantity"]) == 3
     assert Decimal(updated["lines"][0]["backordered_quantity"]) == 3
     assert updated["status"] == "FULFILLING"
+
+
+def test_order_fulfillment_totals_follow_multiple_lines_and_shipments(client):
+    product = client.post(
+        "/api/v1/products",
+        json={"sku": "MULTI-SHIP-1", "name": "Multi shipment product"},
+    ).json()
+    location = client.post(
+        "/api/v1/locations",
+        json={"code": "MULTI-SHIP-L", "name": "Multi shipment warehouse"},
+    ).json()
+    adjustment = client.post("/api/v1/inventory/adjust", json={
+        "product_id": product["id"],
+        "location_id": location["id"],
+        "delta": 20,
+        "reason": "Set up multi-shipment test stock",
+    })
+    assert adjustment.status_code == 200
+
+    created = client.post("/api/v1/orders", json={
+        "order_number": "MULTI-SHIP-O",
+        "customer_name": "Multiple shipments",
+        "requested_ship_date": "2026-11-05T00:00:00",
+        "lines": [
+            {"product_id": product["id"], "requested_quantity": 5},
+            {"product_id": product["id"], "requested_quantity": 7},
+        ],
+    })
+    assert created.status_code == 201
+    order_id = created.json()["id"]
+    lines = created.json()["lines"]
+
+    draft = client.get(f"/api/v1/orders/{order_id}").json()
+    assert sum(Decimal(line["requested_quantity"]) for line in draft["lines"]) == 12
+    assert sum(Decimal(line["allocated_quantity"]) for line in draft["lines"]) == 0
+    assert sum(Decimal(line["shipped_quantity"]) for line in draft["lines"]) == 0
+
+    confirmed = client.post(f"/api/v1/orders/{order_id}/confirm")
+    assert confirmed.status_code == 200
+    allocated = client.get(f"/api/v1/orders/{order_id}").json()
+    assert sum(Decimal(line["allocated_quantity"]) for line in allocated["lines"]) == 12
+    assert sum(Decimal(line["backordered_quantity"]) for line in allocated["lines"]) == 0
+    assert sum(Decimal(line["shipped_quantity"]) for line in allocated["lines"]) == 0
+
+    first_shipment = client.post("/api/v1/shipments", json={
+        "reason": "First partial shipment",
+        "lines": [{
+            "order_line_id": lines[0]["id"],
+            "quantity": 2,
+            "location_id": location["id"],
+        }],
+    })
+    assert first_shipment.status_code == 201
+    second_shipment = client.post("/api/v1/shipments", json={
+        "reason": "Complete remaining order quantities",
+        "lines": [
+            {
+                "order_line_id": lines[0]["id"],
+                "quantity": 3,
+                "location_id": location["id"],
+            },
+            {
+                "order_line_id": lines[1]["id"],
+                "quantity": 7,
+                "location_id": location["id"],
+            },
+        ],
+    })
+    assert second_shipment.status_code == 201
+
+    fulfilled = client.get(f"/api/v1/orders/{order_id}").json()
+    assert fulfilled["status"] == "SHIPPED"
+    assert sum(Decimal(line["requested_quantity"]) for line in fulfilled["lines"]) == 12
+    assert sum(Decimal(line["shipped_quantity"]) for line in fulfilled["lines"]) == 12
+    assert sum(Decimal(line["backordered_quantity"]) for line in fulfilled["lines"]) == 0
+    active_allocations = [
+        row
+        for row in client.get(f"/api/v1/orders/{order_id}/allocations").json()
+        if row["status"] == "ACTIVE"
+    ]
+    assert active_allocations == []
+    shipment_history = client.get(f"/api/v1/orders/{order_id}/shipments").json()
+    assert len(shipment_history) == 2
+    shipped_by_line = {}
+    for shipment in shipment_history:
+        for shipment_line in shipment["lines"]:
+            shipped_by_line[shipment_line["order_line_id"]] = (
+                shipped_by_line.get(shipment_line["order_line_id"], Decimal(0))
+                + Decimal(shipment_line["quantity"])
+            )
+    assert shipped_by_line == {lines[0]["id"]: Decimal(5), lines[1]["id"]: Decimal(7)}
+
+
+def test_order_line_quantity_must_be_positive(client):
+    product = client.post(
+        "/api/v1/products",
+        json={"sku": "ZERO-ORDER-1", "name": "Zero quantity validation product"},
+    ).json()
+    response = client.post("/api/v1/orders", json={
+        "order_number": "ZERO-ORDER-O",
+        "customer_name": "Zero quantity validation",
+        "requested_ship_date": "2026-11-05T00:00:00",
+        "lines": [{"product_id": product["id"], "requested_quantity": 0}],
+    })
+    assert response.status_code == 422
 
 
 def test_ai_proposal_requires_explicit_apply_and_is_audited(client):
@@ -140,6 +320,51 @@ def test_ai_proposal_requires_explicit_apply_and_is_audited(client):
         f"/api/v1/ai/planner-notes/{proposal.json()['interaction_id']}/apply",
         params={"reason": "Repeated attempt"},
     ).status_code == 409
+
+
+def test_ai_parser_matches_exact_receipt_and_order_identifiers(client):
+    product = client.post("/api/v1/products", json={
+        "sku": "SKU-10", "name": "Identifier match product"
+    }).json()
+    location = client.post("/api/v1/locations", json={
+        "code": "LOC-10", "name": "Identifier match warehouse"
+    }).json()
+    for receipt_code in ("R-1", "R-10"):
+        response = client.post("/api/v1/receipts", json={
+            "receipt_code": receipt_code, "product_id": product["id"],
+            "location_id": location["id"], "quantity": 5,
+            "expected_arrival": "2026-11-20T00:00:00",
+        })
+        assert response.status_code == 201
+    order_ids = {}
+    for order_number in ("ORD-1", "ORD-10"):
+        order = client.post("/api/v1/orders", json={
+            "order_number": order_number, "customer_name": "Acme",
+            "requested_ship_date": "2026-11-18T00:00:00",
+            "lines": [{"product_id": product["id"], "requested_quantity": 2}],
+        }).json()
+        order_ids[order_number] = order["id"]
+
+    proposal = client.post("/api/v1/ai/planner-notes", json={
+        "text": "Please delay R-10 to 2026-11-25 and reassign order ORD-10 SKU-10 to LOC-10"
+    })
+
+    assert proposal.status_code == 200
+    result = proposal.json()
+    assert result["identified_orders"] == ["ORD-10"]
+    assert len(result["proposed_actions"]) == 2
+    receipt_actions = [
+        action for action in result["proposed_actions"]
+        if action["action"] == "delay"
+    ]
+    line_actions = [
+        action for action in result["proposed_actions"]
+        if action["action"] == "reassign_line"
+    ]
+    assert [action["receipt_code"] for action in receipt_actions] == ["R-10"]
+    assert len(line_actions) == 1
+    order_detail = client.get(f"/api/v1/orders/{order_ids['ORD-10']}").json()
+    assert line_actions[0]["line_id"] == order_detail["lines"][0]["id"]
 
 
 def test_exceptions_resolve_and_reopen_when_supply_changes(client):

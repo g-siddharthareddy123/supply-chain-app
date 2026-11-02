@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   Activity,
   CalendarDays,
@@ -35,9 +35,16 @@ import {
   number,
   asArray,
 } from "./shared";
+import {
+  getLineFulfillment,
+  getLineLocationSummary,
+  getOrderFulfillment,
+} from "../utils/fulfillment";
 
 export function OrderDetails() {
   const { orderId } = useParams();
+  const location = useLocation();
+  const exceptionReview = location.state?.exceptionReview;
   const notify = useToast();
   const [tab, setTab] = useState("overview");
   const [modal, setModal] = useState("");
@@ -74,6 +81,7 @@ export function OrderDetails() {
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} onRetry={refresh} />;
   if (!order) return <Empty title="Order unavailable" />;
+  const fulfillment = getOrderFulfillment(order, allocations);
   async function mutate(action, line) {
     if (
       action === "confirm" &&
@@ -217,6 +225,16 @@ export function OrderDetails() {
           </>
         }
       />
+      {exceptionReview && (
+        <div className="notice warning">
+          <Activity size={17} />
+          <span>
+            {exceptionReview.lineId
+              ? `Inspect order line ${exceptionReview.lineId} and its current allocations before choosing a planner action.`
+              : "This exception identifies the order but not a specific line. Select the appropriate item on the Lines tab and inspect Allocations before choosing a planner action."}
+          </span>
+        </div>
+      )}
       <div className="tabs">
         {navTabs.map((name) => (
           <button
@@ -254,16 +272,72 @@ export function OrderDetails() {
             <Metric
               label="Backordered units"
               value={number(
-                order.lines.reduce(
-                  (sum, line) => sum + Number(line.backordered_quantity || 0),
-                  0,
-                ),
+                fulfillment.backordered,
               )}
-              caption="Backend allocation result"
+              caption={
+                order.status === "CANCELED"
+                  ? "Not applicable to a canceled order"
+                  : "Backend allocation result"
+              }
               icon={CircleAlert}
               tone="red"
             />
           </div>
+          <Card className="fulfillment-progress-card">
+            <div className="card-title-row">
+              <div>
+                <h3>Fulfillment progress</h3>
+                <span>Shipped quantities are recorded from completed shipments.</span>
+              </div>
+              <Badge>{order.status}</Badge>
+            </div>
+            {fulfillment.percent == null ? (
+              <p className="muted">
+                Fulfillment percentage is unavailable without a positive
+                ordered quantity and recorded shipped quantity.
+              </p>
+            ) : (
+              <>
+                <p className="fulfillment-progress-label">
+                  {number(fulfillment.shipped)} of {number(fulfillment.ordered)}{" "}
+                  units fulfilled ({Math.round(fulfillment.percent)}%)
+                </p>
+                <progress
+                  aria-label="Order fulfillment progress"
+                  max="100"
+                  value={fulfillment.percent}
+                />
+              </>
+            )}
+            <div className="fulfillment-totals">
+              <span>
+                Ordered <b>{number(fulfillment.ordered)}</b>
+              </span>
+              <span>
+                Allocated <b>{number(fulfillment.allocated)}</b>
+              </span>
+              <span>
+                Shipped <b>{number(fulfillment.shipped)}</b>
+              </span>
+              <span>
+                Remaining <b>{number(fulfillment.remaining)}</b>
+              </span>
+              <span>
+                Backordered{" "}
+                <b>
+                  {fulfillment.backordered == null
+                    ? "N/A"
+                    : number(fulfillment.backordered)}
+                </b>
+              </span>
+            </div>
+            {order.status === "CANCELED" && (
+              <p className="muted">
+                Remaining units are not expected to ship because this order is
+                canceled; backorder is not applicable.
+              </p>
+            )}
+          </Card>
           <Card className="advisory-card">
             <div className="card-title-row">
               <div>
@@ -320,36 +394,71 @@ export function OrderDetails() {
               {
                 key: "product_id",
                 label: "Product",
-                render: (line) =>
-                  productMap[line.product_id]?.sku ||
-                  `Product ${line.product_id}`,
+                render: (line) => {
+                  const product = productMap[line.product_id];
+                  return product ? (
+                    <span className="fulfillment-product">
+                      <strong>{product.sku}</strong>
+                      <span>{product.name}</span>
+                    </span>
+                  ) : (
+                    "Product details unavailable"
+                  );
+                },
               },
               {
                 key: "requested_quantity",
                 label: "Requested",
-                render: (line) => number(line.requested_quantity),
+                render: (line) =>
+                  number(getLineFulfillment(order, line, allocations).ordered),
               },
               {
                 key: "allocated_quantity",
                 label: "Allocated",
-                render: (line) => number(line.allocated_quantity),
+                render: (line) =>
+                  number(getLineFulfillment(order, line, allocations).allocated),
               },
               {
                 key: "shipped_quantity",
                 label: "Shipped",
-                render: (line) => number(line.shipped_quantity),
+                render: (line) =>
+                  number(getLineFulfillment(order, line, allocations).shipped),
+              },
+              {
+                key: "remaining_quantity",
+                label: "Remaining",
+                render: (line) =>
+                  number(getLineFulfillment(order, line, allocations).remaining),
               },
               {
                 key: "backordered_quantity",
                 label: "Backordered",
+                render: (line) => {
+                  const lineFulfillment = getLineFulfillment(
+                    order,
+                    line,
+                    allocations,
+                  );
+                  return lineFulfillment.backordered == null ? (
+                    "N/A (canceled)"
+                  ) : (
+                    <span
+                      className={
+                        lineFulfillment.backordered > 0 ? "risk-note" : ""
+                      }
+                    >
+                      {number(lineFulfillment.backordered)}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "fulfillment_status",
+                label: "Fulfillment status",
                 render: (line) => (
-                  <span
-                    className={
-                      Number(line.backordered_quantity) > 0 ? "risk-note" : ""
-                    }
-                  >
-                    {number(line.backordered_quantity)}
-                  </span>
+                  <Badge>
+                    {getLineFulfillment(order, line, allocations).status}
+                  </Badge>
                 ),
               },
               {
@@ -358,12 +467,47 @@ export function OrderDetails() {
                 render: (line) => dateLabel(line.promised_ship_date),
               },
               {
-                key: "preferred_location_id",
-                label: "Preferred location",
-                render: (line) =>
-                  line.preferred_location_id
-                    ? locationMap[line.preferred_location_id]?.code
-                    : "Auto",
+                key: "fulfillment_location",
+                label: "Fulfillment locations",
+                render: (line) => {
+                  const lineLocations = getLineLocationSummary(
+                    line.id,
+                    allocations,
+                    shipments,
+                    locationMap,
+                  );
+                  return (
+                    <span className="fulfillment-locations">
+                      {lineLocations.length ? (
+                        lineLocations.map((item) => (
+                          <span key={item.locationId}>
+                            {item.location
+                              ? `${item.location.code} · ${item.location.name}`
+                              : `Location ${item.locationId} (details unavailable)`}
+                            {item.allocated > 0 &&
+                              ` · ${number(item.allocated)} allocated`}
+                            {item.shipped > 0 &&
+                              ` · ${number(item.shipped)} shipped`}
+                          </span>
+                        ))
+                      ) : (
+                        <span>
+                          {line.preferred_location_id
+                            ? "No current allocation"
+                            : "Not assigned"}
+                        </span>
+                      )}
+                      {line.preferred_location_id && (
+                        <span>
+                          Preferred:{" "}
+                          {locationMap[line.preferred_location_id]
+                            ? `${locationMap[line.preferred_location_id].code} · ${locationMap[line.preferred_location_id].name}`
+                            : "Location details unavailable"}
+                        </span>
+                      )}
+                    </span>
+                  );
+                },
               },
               {
                 key: "actions",
